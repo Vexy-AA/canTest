@@ -93,7 +93,7 @@ int main(void)
   MX_CAN_Init();
   MX_TIM1_Init();
   MX_TIM8_Init();
-  MX_USB_DEVICE_Init(); // test
+  MX_USB_DEVICE_Init(); // test 1
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
