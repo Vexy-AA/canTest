@@ -1,8 +1,9 @@
 #include "slcan.hpp"
-#include "usbd_cdc_if.h"
+
 
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
+extern CAN_HandleTypeDef hcan;
 
 ////////Helper Methods//////////
 
@@ -584,7 +585,23 @@ int16_t SLCAN::CANIface::receiveSerial(uint8_t* Buf, uint32_t *Len){
     }
     return 0;
 }
-
+int16_t SLCAN::CANIface::receiveCan(){
+    CAN_RxHeaderTypeDef msgHeader;
+    uint32_t msgId = 0;
+    uint8_t msgData[8];
+    
+    HAL_CAN_GetRxMessage(&hcan, CAN_RX_FIFO0, &msgHeader, msgData);
+        
+    if (msgHeader.IDE == CAN_ID_EXT)
+    {
+        msgId = msgHeader.ExtId;
+    }
+    else
+    {
+        msgId = msgHeader.StdId;
+    }
+    return 0;
+}
 int16_t SLCAN::CANIface::sendCan(){
     if (rx_queue_.available()) {
         // if we already have something in buffer transmit it

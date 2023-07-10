@@ -5,6 +5,8 @@
 #include "ringBuffer.hpp"
 #include <stdio.h>
 #include "stm32f3xx_hal.h"
+#include "usbd_cdc_if.h"
+#include "stm32f3xx_hal_can.h"
 #include <string.h>
 #define SLCAN_BUFFER_SIZE 200
 #define SLCAN_RX_QUEUE_SIZE 64
@@ -252,6 +254,7 @@ public:
     int16_t receive(CANFrame& out_frame, uint64_t& rx_time,
                     CanIOFlags& out_flags) ;
     int16_t receiveSerial(uint8_t* Buf, uint32_t *Len);
+    int16_t receiveCan();
     int16_t sendCan();
 
 

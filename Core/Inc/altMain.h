@@ -12,7 +12,7 @@ extern "C"
 
 int altMain();
 int8_t usbReceive(uint8_t* Buf, uint32_t *Len);
-
+int8_t canReceive();
 
 
 
