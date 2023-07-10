@@ -1,8 +1,8 @@
 #pragma once
 
-#include <atomic>
-#include <stdint.h>
 
+#include <stdint.h>
+#include <atomic>
 /*
  * Circular buffer of bytes.
  */

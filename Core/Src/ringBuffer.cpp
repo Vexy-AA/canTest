@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "RingBuffer.h"
+#include "RingBuffer.hpp"
 
 ByteBuffer::ByteBuffer(uint32_t _size)
 {

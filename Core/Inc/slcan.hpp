@@ -1,12 +1,8 @@
 #ifndef SLCAN_HPP
 #define SLCAN_HPP
 
-#ifdef _111_cplusplus
- {
-#endif
-
 #include "stdint.h"
-#include "ringBuffer.h"
+#include "ringBuffer.hpp"
 #include <stdio.h>
 #include "stm32f3xx_hal.h"
 #include <string.h>
@@ -17,17 +13,24 @@
 #define HAL_CAN_RX_QUEUE_SIZE 128
 #endif
 
+#ifndef UID_BASE
+#define _STM303
+
+#ifdef _STM303
+#define UID_BASE              0x1FFFF7ACU       /*!< Unique device ID register base address */
+#elif _STM405
+#define UID_BASE                     0x1FFF7A10U           /*!< Unique device ID register base address */
+#endif
+#endif
+
+#define UDID_START UID_BASE
+
 static_assert(HAL_CAN_RX_QUEUE_SIZE <= 254, "Invalid CAN Rx queue size");
-//simple variant of std c function to reduce used flash space
-void *memset(void *s, int c, size_t n)
-{
-    uint8_t *b = (uint8_t *)s;
-    while (n--) {
-        *b++ = c;
-    }
-    return s;
-}
- 
+
+
+
+bool get_system_id_unformatted(uint8_t buf[], uint8_t &len);
+
 
 namespace SLCAN
 {
@@ -176,9 +179,6 @@ class CANIface
     // Parsing bytes received on the serial port
     inline void addByte(const uint8_t byte);
 
-    // track changes to slcan serial port
-    void update_slcan_port();
-
     bool initialized_;
 
     char buf_[SLCAN_BUFFER_SIZE + 1]; // buffer to record raw frame nibbles before parsing
@@ -186,7 +186,7 @@ class CANIface
     //UARTDriver* _port; // UART interface port reference to be used for SLCAN iface
 
     ObjectBuffer<CanRxItem> rx_queue_; // Parsed Rx Frame queue
-
+    ByteBuffer rxSerial;
     const uint32_t _serial_lock_key = 0x53494442; // Key used to lock UART port for use by slcan
 
    /*  AP_Int8 _slcan_can_port;
@@ -203,15 +203,38 @@ class CANIface
     CANIface* _can_iface; // Can interface to be used for interaction by SLCAN interface
     //HAL_Semaphore port_sem;
     bool _set_by_sermgr;
+
+    uint64_t native_micros64(){
+        uint32_t ms = HAL_GetTick();
+        uint32_t us = SysTick->VAL;
+
+        if (ms != HAL_GetTick()){
+            ms = HAL_GetTick();
+            us = SysTick->VAL;
+        }
+        return ms * 1000 - us / ((SysTick->LOAD + 1) / 1000);
+    }
+
+    //simple variant of std c function to reduce used flash space
+    void *memset(void *s, int c, size_t n){
+        uint8_t *b = (uint8_t *)s;
+        while (n--) {
+            *b++ = c;
+        }
+        return s;
+    }
+ 
 public:
     CANIface():
-        rx_queue_(HAL_CAN_RX_QUEUE_SIZE)
+        rx_queue_(HAL_CAN_RX_QUEUE_SIZE),
+        rxSerial(100)
     {
        // AP_Param::setup_object_defaults(this, var_info);
     }
 
     // Overriden methods
     //bool set_event_handle(EventHandle* evt_handle) ;
+    int8_t sendBack(uint8_t* Buf, uint32_t *Len);
     uint16_t getNumFilters() const;
     uint32_t getErrorCount() const;
     //void get_stats(ExpandingString &);
@@ -228,7 +251,8 @@ public:
 
     int16_t receive(CANFrame& out_frame, uint64_t& rx_time,
                     CanIOFlags& out_flags) ;
-
+    int16_t receiveSerial(uint8_t* Buf, uint32_t *Len);
+    int16_t sendCan();
 
 
 enum OperatingMode {
@@ -273,27 +297,8 @@ protected:
     OperatingMode mode_;
 };
 
-uint64_t native_micros64()
-{
-    uint32_t ms = HAL_GetTick();
-    uint32_t us = SysTick->VAL;
-
-    if (ms != HAL_GetTick()){
-        ms = HAL_GetTick();
-        us = SysTick->VAL;
-    }
-    return ms * 1000 - us / ((SysTick->LOAD + 1) / 1000);
-}
-
 
 }
 
-
-
-
-
-#ifdef __11cplusplus
-}
-#endif
 
 #endif /* SLCAN_HPP */

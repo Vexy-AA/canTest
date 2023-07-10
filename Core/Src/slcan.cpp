@@ -1,8 +1,8 @@
 #include "slcan.hpp"
+#include "usbd_cdc_if.h"
 
 
-
-
+extern USBD_HandleTypeDef hUsbDeviceFS;
 
 ////////Helper Methods//////////
 
@@ -90,6 +90,49 @@ bool SLCAN::CANIface::handle_FrameDataExt(const char* cmd, bool canfd)
     return push_Frame(f);
 }
 
+uint8_t SLCAN::CANFrame::dlcToDataLength(uint8_t dlc)
+{
+    /*
+    Data Length Code      9  10  11  12  13  14  15
+    Number of data bytes 12  16  20  24  32  48  64
+    */
+    if (dlc <= 8) {
+        return dlc;
+    } else if (dlc == 9) {
+        return 12;
+    } else if (dlc == 10) {
+        return 16;
+    } else if (dlc == 11) {
+        return 20;
+    } else if (dlc == 12) {
+        return 24;
+    } else if (dlc == 13) {
+        return 32;
+    } else if (dlc == 14) {
+        return 48;
+    }
+    return 64;
+}
+
+uint8_t SLCAN::CANFrame::dataLengthToDlc(uint8_t data_length)
+{
+    if (data_length <= 8) {
+        return data_length;
+    } else if (data_length <= 12) {
+        return 9;
+    } else if (data_length <= 16) {
+        return 10;
+    } else if (data_length <= 20) {
+        return 11;
+    } else if (data_length <= 24) {
+        return 12;
+    } else if (data_length <= 32) {
+        return 13;
+    } else if (data_length <= 48) {
+        return 14;
+    }
+    return 15;
+}
 /**
  * General frame format:
  *  <type> <id> <dlc> <data>
@@ -210,24 +253,6 @@ static inline const char* getASCIIStatusCode(bool status)
     return status ? "\r" : "\a";
 }
 
-/* bool SLCAN::CANIface::init_passthrough(uint8_t i)
-{
-    // we setup undelying can iface here which we use for passthrough
-    if (initialized_ ||
-        _slcan_can_port <= 0 ||
-        _slcan_can_port != i+1) {
-        return false;
-    }
-
-    _can_iface = hal.can[i];
-    _iface_num = _slcan_can_port - 1;
-    _prev_ser_port = -1;
-#if HAL_CANMANAGER_ENABLED
-    AP::can().log_text(AP_CANManager::LOG_INFO, LOG_TAG, "Setting SLCAN Passthrough for CAN%d\n", _slcan_can_port - 1);
-#endif
-    return true;
-} */
-
 /**
  * General frame format:
  *  <type> <id> <dlc> <data> [timestamp msec] [flags]
@@ -241,9 +266,6 @@ static inline const char* getASCIIStatusCode(bool status)
  */
 int16_t SLCAN::CANIface::reportFrame(const CANFrame& frame, uint64_t timestamp_usec)
 {
-    /* if (_port == nullptr) {
-        return -1;
-    } */
 #if HAL_CANFD_SUPPORTED
     constexpr unsigned SLCANMaxFrameSize = 200;
 #else
@@ -321,6 +343,8 @@ int16_t SLCAN::CANIface::reportFrame(const CANFrame& frame, uint64_t timestamp_u
         return 0;
     } */
     //Write to Serial
+    USBD_CDC_SetTxBuffer(&hUsbDeviceFS, &buffer[0], frame_size);
+    USBD_CDC_TransmitPacket(&hUsbDeviceFS);
     /* if (!_port->write_locked(&buffer[0], frame_size, _serial_lock_key)) { !!!
         return 0;
     } */
@@ -330,11 +354,6 @@ int16_t SLCAN::CANIface::reportFrame(const CANFrame& frame, uint64_t timestamp_u
 //Accepts command string, returns response string or nullptr if no response is needed.
 const char* SLCAN::CANIface::processCommand(char* cmd)
 {
-
-    /* if (_port == nullptr) {
-        return nullptr;
-    } */
-
     /*
     * High-traffic SLCAN commands go first
     */
@@ -374,14 +393,16 @@ const char* SLCAN::CANIface::processCommand(char* cmd)
     case 'F': {             // Get status flags
         resp_len = snprintf((char*)resp_bytes, sizeof(resp_bytes), "F%02X\r", unsigned(0));    // Returning success for compatibility reasons
         if (resp_len > 0) {
-            //_port->write_locked(resp_bytes, resp_len, _serial_lock_key);
+            USBD_CDC_SetTxBuffer(&hUsbDeviceFS, resp_bytes, resp_len);
+            USBD_CDC_TransmitPacket(&hUsbDeviceFS);
         }
         return nullptr;
     }
     case 'V': {             // HW/SW version
         resp_len = snprintf((char*)resp_bytes, sizeof(resp_bytes),"V%x%x%x%x\r", 1, 0, 1, 0);
         if (resp_len > 0) {
-            //_port->write_locked(resp_bytes, resp_len, _serial_lock_key);
+            USBD_CDC_SetTxBuffer(&hUsbDeviceFS, resp_bytes, resp_len);
+            USBD_CDC_TransmitPacket(&hUsbDeviceFS);
         }
         return nullptr;
     }
@@ -391,16 +412,17 @@ const char* SLCAN::CANIface::processCommand(char* cmd)
         uint8_t unique_id[uid_buf_len];
         char buf[uid_buf_len * 2 + 1] = {'\0'};
         char* pos = &buf[0];
-        /* if (hal.util->get_system_id_unformatted(unique_id, uid_len)) {
+        if (get_system_id_unformatted(unique_id, uid_len)) {
             for (uint8_t i = 0; i < uid_buf_len; i++) {
                 *pos++ = nibble2hex(unique_id[i] >> 4);
                 *pos++ = nibble2hex(unique_id[i]);
             }
-        } */
+        } 
         *pos++ = '\0';
         resp_len = snprintf((char*)resp_bytes, sizeof(resp_bytes),"N%s\r", &buf[0]);
         if (resp_len > 0) {
-            //_port->write_locked(resp_bytes, resp_len, _serial_lock_key);
+            USBD_CDC_SetTxBuffer(&hUsbDeviceFS, resp_bytes, resp_len);
+            USBD_CDC_TransmitPacket(&hUsbDeviceFS);
         }
         return nullptr;
     }
@@ -434,9 +456,10 @@ inline void SLCAN::CANIface::addByte(const uint8_t byte)
 
         // Sending the response if provided
         if (response != nullptr) {
-
-            /* _port->write_locked(reinterpret_cast<const uint8_t*>(response),
-                                strlen(response), _serial_lock_key); */
+            char resp[10];
+            strcpy(resp, response);
+            USBD_CDC_SetTxBuffer(&hUsbDeviceFS, reinterpret_cast<uint8_t*>(resp), strlen(response));
+            USBD_CDC_TransmitPacket(&hUsbDeviceFS);
         }
     } else if (byte == 8 || byte == 127) {  // DEL or BS (backspace)
         if (pos_ > 0) {
@@ -446,67 +469,6 @@ inline void SLCAN::CANIface::addByte(const uint8_t byte)
         pos_ = 0;   // Invalid byte - drop the current command
     }
 }
-/* 
-void SLCAN::CANIface::update_slcan_port()
-{
-    const bool armed = hal.util->get_soft_armed();
-    // const bool armed = false;
-    if (_set_by_sermgr) {
-        if (armed && _port != nullptr) {
-            // auto-disable when armed
-            _port->lock_port(0, 0);
-            _port = nullptr;
-            _set_by_sermgr = false;
-        }
-        return;
-    }
-    if (_port == nullptr && !armed) {
-         _port = AP::serialmanager().find_serial(AP_SerialManager::SerialProtocol_SLCAN, 0);
-        if (_port != nullptr) {
-            _port->lock_port(_serial_lock_key, _serial_lock_key);
-            _set_by_sermgr = true;
-            return;
-        }
-    }
-    if (_prev_ser_port != _slcan_ser_port) {
-        if (!_slcan_start_req) {
-            _slcan_start_req_time = AP_HAL::native_millis();
-            _slcan_start_req = true;
-        }
-        if (((AP_HAL::native_millis() - _slcan_start_req_time) < ((uint32_t)_slcan_start_delay*1000))) {
-            return;
-        }
-        _port = AP::serialmanager().get_serial_by_id(_slcan_ser_port);
-        if (_port == nullptr) {
-            _slcan_ser_port.set_and_save(-1);
-            return;
-        }
-        _port->lock_port(_serial_lock_key, _serial_lock_key);
-        _prev_ser_port = _slcan_ser_port;
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CANManager: Starting SLCAN Passthrough on Serial %d with CAN%d", _slcan_ser_port.get(), _iface_num);
-        _last_had_activity = AP_HAL::native_millis();
-    }
-    if (_port == nullptr) {
-        return;
-    }
-    if (((AP_HAL::native_millis() - _last_had_activity) > ((uint32_t)_slcan_timeout*1000)) &&
-        (uint32_t)_slcan_timeout != 0) {
-        _port->lock_port(0, 0);
-        _port = nullptr;
-        _slcan_ser_port.set_and_save(-1);
-        _prev_ser_port = -1;
-        _slcan_start_req = false;
-    }
-} */
-
-/* bool SLCAN::CANIface::set_event_handle(AP_HAL::EventHandle* evt_handle)
-{
-    // When in passthrough mode methods is handled through can iface
-    if (_can_iface) {
-        return _can_iface->set_event_handle(evt_handle);
-    }
-    return false;
-} */
 
 uint16_t SLCAN::CANIface::getNumFilters() const
 {
@@ -526,14 +488,6 @@ uint32_t SLCAN::CANIface::getErrorCount() const
     return 0;
 }
 
-/* void SLCAN::CANIface::get_stats(ExpandingString &str)
-{
-    // When in passthrough mode methods is handled through can iface
-    if (_can_iface) {
-        _can_iface->get_stats(str);
-    }
-} */
-
 bool SLCAN::CANIface::is_busoff() const
 {
     // When in passthrough mode methods is handled through can iface
@@ -542,15 +496,6 @@ bool SLCAN::CANIface::is_busoff() const
     }
     return false;
 }
-
-/* bool SLCAN::CANIface::configureFilters(const CanFilterConfig* filter_configs, uint16_t num_configs)
-{
-    // When in passthrough mode methods is handled through can iface
-    if (_can_iface) {
-        return _can_iface->configureFilters(filter_configs, num_configs);
-    }
-    return true;
-} */
 
 void SLCAN::CANIface::flush_tx()
 {
@@ -573,16 +518,16 @@ void SLCAN::CANIface::clear_rx()
     rx_queue_.clear();
 }
 
-bool SLCAN::CANIface::is_initialized() const
+/* bool SLCAN::CANIface::is_initialized() const
 {
     // When in passthrough mode methods is handled through can iface
     if (_can_iface) {
         return _can_iface->is_initialized();
     }
     return false;
-}
+} */
 
-bool SLCAN::CANIface::select(bool &read, bool &write, const CANFrame* const pending_tx,
+/* bool SLCAN::CANIface::select(bool &read, bool &write, const CANFrame* const pending_tx,
                              uint64_t blocking_deadline)
 {
     update_slcan_port();
@@ -591,35 +536,26 @@ bool SLCAN::CANIface::select(bool &read, bool &write, const CANFrame* const pend
     if (_can_iface) {
         ret = _can_iface->select(read, write, pending_tx, blocking_deadline);
     }
-
-    /* if (_port == nullptr) {
-        return ret;
-    } */
-
+    
     // if under passthrough, we only do send when can_iface also allows it
-    /* if (_port->available_locked(_serial_lock_key) || rx_queue_.available()) {
+    if (_port->available_locked(_serial_lock_key) || rx_queue_.available()) {
         // allow for receiving messages over slcan
         read = true;
         ret = true;
-    } */
+    }
 
     return ret;
-}
+} */
 
 
 // send method to transmit the frame through SLCAN interface
 int16_t SLCAN::CANIface::send(const CANFrame& frame, uint64_t tx_deadline, CanIOFlags flags)
 {
-    update_slcan_port();
     int16_t ret = 0;
     // When in passthrough mode select is handled through can iface
     if (_can_iface) {
         ret = _can_iface->send(frame, tx_deadline, flags);
     }
-
-   /*  if (_port == nullptr) {
-        return ret;
-    } */
 
     if (frame.isErrorFrame()
 #if !HAL_CANFD_SUPPORTED
@@ -632,11 +568,62 @@ int16_t SLCAN::CANIface::send(const CANFrame& frame, uint64_t tx_deadline, CanIO
     return ret;
 }
 
+int16_t SLCAN::CANIface::receiveSerial(uint8_t* Buf, uint32_t *Len){
+    rxSerial.write(Buf, *Len);
+    int32_t nBytes = rxSerial.available();
+    while(nBytes--){
+        uint8_t b;
+        rxSerial.read_byte(&b);
+        addByte(b);
+        if (!rx_queue_.space()) {
+            break;
+        }
+    }
+    if (rx_queue_.available()) {
+        //return sendCan();
+    }
+    return 0;
+}
+
+int16_t SLCAN::CANIface::sendCan(){
+    if (rx_queue_.available()) {
+        // if we already have something in buffer transmit it
+        CanRxItem frm;
+        if (!rx_queue_.peek(frm)) {
+            return 0;
+        }
+        /* out_frame = frm.frame;
+        rx_time = frm.timestamp_us;
+        out_flags = frm.flags; */
+        _last_had_activity = HAL_GetTick();
+        // Also send this frame over can_iface when in passthrough mode,
+        // We just push this frame without caring for priority etc
+        if (_can_iface) {
+            bool read = false;
+            bool write = true;
+            _can_iface->select(read, write, &frm.frame, 0); // select without blocking
+            if (write && _can_iface->send(frm.frame, native_micros64() + 100000, frm.flags) == 1) {
+                    rx_queue_.pop();
+                    num_tries = 0;
+            } else if (num_tries > 8) {
+                rx_queue_.pop();
+                num_tries = 0;
+            } else {
+                num_tries++;
+            }
+        } else {
+            // we just throw away frames if we don't
+            // have any can iface to pass through to
+            rx_queue_.pop();
+        }
+        return 1;
+    }
+    return 0;
+}
 // receive method to read the frame recorded in the buffer
 int16_t SLCAN::CANIface::receive(CANFrame& out_frame, uint64_t& rx_time,
                                  CanIOFlags& out_flags)
 {
-    update_slcan_port();
     // When in passthrough mode select is handled through can iface
     if (_can_iface) {
         int16_t ret = _can_iface->receive(out_frame, rx_time, out_flags);
@@ -655,20 +642,19 @@ int16_t SLCAN::CANIface::receive(CANFrame& out_frame, uint64_t& rx_time,
         return 0;
     } */
 
-    /* if (_port->available_locked(_serial_lock_key)) {
-        uint32_t num_bytes = _port->available_locked(_serial_lock_key);
-        // flush bytes from port
-        while (num_bytes--) {
-            uint8_t b;
-            if (!_port->read_locked(_serial_lock_key, b)) {
-                break;
-            }
-            addByte(b);
-            if (!rx_queue_.space()) {
-                break;
-            }
+    
+    /* uint32_t num_bytes = _port->available_locked(_serial_lock_key);
+    // flush bytes from port
+    while (num_bytes--) {
+        uint8_t b;
+        if (!_port->read_locked(_serial_lock_key, b)) {
+            break;
         }
-    } !!! */ 
+        addByte(b);
+        if (!rx_queue_.space()) {
+            break;
+        }
+    }
     if (rx_queue_.available()) {
         // if we already have something in buffer transmit it
         CanRxItem frm;
@@ -678,7 +664,7 @@ int16_t SLCAN::CANIface::receive(CANFrame& out_frame, uint64_t& rx_time,
         out_frame = frm.frame;
         rx_time = frm.timestamp_us;
         out_flags = frm.flags;
-        //_last_had_activity = millis(); !!!
+        _last_had_activity = HAL_GetTick();
         // Also send this frame over can_iface when in passthrough mode,
         // We just push this frame without caring for priority etc
         if (_can_iface) {
@@ -700,12 +686,20 @@ int16_t SLCAN::CANIface::receive(CANFrame& out_frame, uint64_t& rx_time,
             rx_queue_.pop();
         }
         return 1;
-    }
+    } */
     return 0;
 }
-/* 
-void SLCAN::CANIface::reset_params()
-{
-    _slcan_ser_port.set_and_save(-1);
+
+int8_t SLCAN::CANIface::sendBack(uint8_t* Buf, uint32_t *Len){
+    CDC_Transmit_FS(Buf, *Len);
+    return 0;
 }
- */
+
+
+bool get_system_id_unformatted(uint8_t buf[], uint8_t &len)
+{
+    len = MIN(12, len);
+    memcpy(buf, (const void *)UDID_START, len);
+    return true;
+}
+
