@@ -93,6 +93,7 @@ int main(void)
   MX_TIM8_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  
   altMain();
   /* USER CODE END 2 */
 

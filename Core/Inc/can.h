@@ -29,7 +29,10 @@ extern "C" {
 #include "main.h"
 
 /* USER CODE BEGIN Includes */
-
+#ifndef CAN
+#define CAN
+#endif
+#include "stm32f3xx_hal_can.h"
 /* USER CODE END Includes */
 
 extern CAN_HandleTypeDef hcan;
