@@ -60,7 +60,7 @@ void MX_CAN_Init(void)
   canFilter.FilterMaskIdHigh = 0;
   canFilter.FilterMaskIdLow = 0;
   canFilter.FilterFIFOAssignment = CAN_FILTER_FIFO0;
-  canFilter.FilterBank = 1;
+  canFilter.FilterBank = 0;
   canFilter.FilterMode = CAN_FILTERMODE_IDMASK;
   canFilter.FilterScale = CAN_FILTERSCALE_32BIT;
   canFilter.FilterActivation = CAN_FILTER_ENABLE;
@@ -68,9 +68,12 @@ void MX_CAN_Init(void)
 
   const CAN_FilterTypeDef canFilt = canFilter;
   HAL_CAN_ConfigFilter(&hcan, &canFilt);
+  HAL_CAN_ActivateNotification(&hcan,CAN_IT_RX_FIFO0_MSG_PENDING);
 
-  HAL_CAN_Start(&hcan);
-  HAL_CAN_ActivateNotification(&hcan,CAN_IT_RX_FIFO0_MSG_PENDING)
+  
+
+  
+  
   /* USER CODE END CAN_Init 2 */
 
 }

@@ -1,18 +1,22 @@
 #ifndef ALT_MAIN_H_
 #define ALT_MAIN_H_
+
+#include "can.h"
+#include "stdint.h"
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
 
-#include "stdint.h"
+
 
 
 
 int altMain();
 int8_t usbReceive(uint8_t* Buf, uint32_t *Len);
-int8_t canReceive();
+void canRxInt(CAN_HandleTypeDef *_hcan);
 
 
 

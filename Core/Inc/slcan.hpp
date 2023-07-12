@@ -1,3 +1,4 @@
+#pragma once
 #ifndef SLCAN_HPP
 #define SLCAN_HPP
 
@@ -8,6 +9,7 @@
 #include "usbd_cdc_if.h"
 #include "stm32f3xx_hal_can.h"
 #include <string.h>
+#include "bxcan.hpp"
 #define SLCAN_BUFFER_SIZE 200
 #define SLCAN_RX_QUEUE_SIZE 64
 
@@ -26,6 +28,10 @@
 #endif
 
 #define UDID_START UID_BASE
+#define CAN1_BASE             (APB1PERIPH_BASE + 0x00006400U)
+#define CAN2_BASE             (APB1PERIPH_BASE + 0x00006800U)
+#define PERF_STATS(x) (x++)
+#define HAL_CAN_BASE_LIST reinterpret_cast<bxcan::CanType*>(uintptr_t(CAN1_BASE))
 
 static_assert(HAL_CAN_RX_QUEUE_SIZE <= 254, "Invalid CAN Rx queue size");
 
@@ -131,6 +137,66 @@ struct CANFrame {
 
 class CANIface
 {
+public:
+    CANIface():
+        rx_queue_(HAL_CAN_RX_QUEUE_SIZE),
+        rxSerial(100)
+    {
+       // AP_Param::setup_object_defaults(this, var_info);
+    }
+
+    // Overriden methods
+    //bool set_event_handle(EventHandle* evt_handle) ;
+    int8_t sendBack(uint8_t* Buf, uint32_t *Len);
+    uint16_t getNumFilters() const;
+    uint32_t getErrorCount() const;
+    //void get_stats(ExpandingString &);
+    bool is_busoff() const;
+    //bool configureFilters(const CanFilterConfig* filter_configs, uint16_t num_configs);
+    void flush_tx();
+    void clear_rx();
+    bool is_initialized() const;
+    bool select(bool &read, bool &write,
+                const CANFrame* const pending_tx,
+                uint64_t blocking_deadline) ;
+    int16_t send(const CANFrame& frame, uint64_t tx_deadline,
+                 CanIOFlags flags) ;
+
+    int16_t receive(CANFrame& out_frame, uint64_t& rx_time,
+                    CanIOFlags& out_flags) ;
+    int16_t receiveSerial(uint8_t* Buf, uint32_t *Len);
+    int16_t canRxInt(uint8_t fifo_index, uint64_t timestamp_us);
+    int16_t sendCan();
+
+
+    enum OperatingMode {
+        PassThroughMode,
+        NormalMode,
+        SilentMode,
+        FilteredMode
+    };
+
+    OperatingMode get_operating_mode() { return mode_; }
+
+    typedef uint16_t CanIOFlags;
+    static const CanIOFlags Loopback = 1;
+    static const CanIOFlags AbortOnError = 2;
+    static const CanIOFlags IsMAVCAN = 4;
+
+
+    typedef struct {
+        uint32_t tx_requests;
+        uint32_t tx_rejected;
+        uint32_t tx_overflow;
+        uint32_t tx_success;
+        uint32_t tx_timedout;
+        uint32_t tx_abort;
+        uint32_t rx_received;
+        uint32_t rx_overflow;
+        uint32_t rx_errors;
+        uint32_t num_busoff_err;
+    } bus_stats_t;
+
     // Single Rx Frame with related info
     struct CanRxItem {
         uint64_t timestamp_us = 0;
@@ -162,6 +228,18 @@ class CANIface
         }
     };
 
+    static uint64_t native_micros64(){
+        uint32_t ms = HAL_GetTick();
+        uint32_t us = SysTick->VAL;
+
+        if (ms != HAL_GetTick()){
+            ms = HAL_GetTick();
+            us = SysTick->VAL;
+        }
+        return ms * 1000 - us / ((SysTick->LOAD + 1) / 1000);
+    }
+private:    
+    static constexpr bxcan::CanType* const cans_[1] = {reinterpret_cast<bxcan::CanType*>(uintptr_t(CAN_BASE))};
     int16_t reportFrame(const CANFrame& frame, uint64_t timestamp_usec);
 
     const char* processCommand(char* cmd);
@@ -206,16 +284,7 @@ class CANIface
     //HAL_Semaphore port_sem;
     bool _set_by_sermgr;
 
-    uint64_t native_micros64(){
-        uint32_t ms = HAL_GetTick();
-        uint32_t us = SysTick->VAL;
-
-        if (ms != HAL_GetTick()){
-            ms = HAL_GetTick();
-            us = SysTick->VAL;
-        }
-        return ms * 1000 - us / ((SysTick->LOAD + 1) / 1000);
-    }
+    
 
     //simple variant of std c function to reduce used flash space
     void *memset(void *s, int c, size_t n){
@@ -225,55 +294,8 @@ class CANIface
         }
         return s;
     }
- 
-public:
-    CANIface():
-        rx_queue_(HAL_CAN_RX_QUEUE_SIZE),
-        rxSerial(100)
-    {
-       // AP_Param::setup_object_defaults(this, var_info);
-    }
-
-    // Overriden methods
-    //bool set_event_handle(EventHandle* evt_handle) ;
-    int8_t sendBack(uint8_t* Buf, uint32_t *Len);
-    uint16_t getNumFilters() const;
-    uint32_t getErrorCount() const;
-    //void get_stats(ExpandingString &);
-    bool is_busoff() const;
-    //bool configureFilters(const CanFilterConfig* filter_configs, uint16_t num_configs);
-    void flush_tx();
-    void clear_rx();
-    bool is_initialized() const;
-    bool select(bool &read, bool &write,
-                const CANFrame* const pending_tx,
-                uint64_t blocking_deadline) ;
-    int16_t send(const CANFrame& frame, uint64_t tx_deadline,
-                 CanIOFlags flags) ;
-
-    int16_t receive(CANFrame& out_frame, uint64_t& rx_time,
-                    CanIOFlags& out_flags) ;
-    int16_t receiveSerial(uint8_t* Buf, uint32_t *Len);
-    int16_t receiveCan();
-    int16_t sendCan();
-
-
-enum OperatingMode {
-        PassThroughMode,
-        NormalMode,
-        SilentMode,
-        FilteredMode
-    };
-
-    OperatingMode get_operating_mode() { return mode_; }
-
-    typedef uint16_t CanIOFlags;
-    static const CanIOFlags Loopback = 1;
-    static const CanIOFlags AbortOnError = 2;
-    static const CanIOFlags IsMAVCAN = 4;
-
-
-    typedef struct {
+    
+    struct bus_stats {
         uint32_t tx_requests;
         uint32_t tx_rejected;
         uint32_t tx_overflow;
@@ -284,9 +306,20 @@ enum OperatingMode {
         uint32_t rx_overflow;
         uint32_t rx_errors;
         uint32_t num_busoff_err;
-    } bus_stats_t;
+        uint32_t num_events;
+        uint32_t esr;
+    } stats;
 
+    CANFrame isr_rx_frame;
+    CanRxItem isr_rx_item;
+    bool irq_init_:1;
+    bool initialised_:1;
+    bool had_activity_:1;
 
+    int16_t sendFrame(const CANFrame& frame, uint64_t tx_deadline,
+                       CanIOFlags flags);
+
+    CanTxItem pending_tx_[3];
 protected:
     int8_t get_iface_num() {
         return _iface_num;

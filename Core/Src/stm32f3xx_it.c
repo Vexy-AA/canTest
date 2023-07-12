@@ -209,7 +209,8 @@ void SysTick_Handler(void)
 void CAN_RX1_IRQHandler(void)
 {
   /* USER CODE BEGIN CAN_RX1_IRQn 0 */
-
+  canRxInt(&hcan);
+  return;
   /* USER CODE END CAN_RX1_IRQn 0 */
   HAL_CAN_IRQHandler(&hcan);
   /* USER CODE BEGIN CAN_RX1_IRQn 1 */
