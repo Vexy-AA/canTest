@@ -16,7 +16,7 @@ extern "C"
 
 int altMain();
 int8_t usbReceive(uint8_t* Buf, uint32_t *Len);
-void canRxInt(CAN_HandleTypeDef *_hcan);
+void canRxInt(CAN_HandleTypeDef *_hcan, uint8_t fifo);
 
 
 
