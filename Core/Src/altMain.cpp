@@ -15,11 +15,11 @@ int altMain(){
 }
 
 int8_t usbReceive(uint8_t* Buf, uint32_t *Len){
-    slCan.receiveSerial(Buf,Len);
+    slCan.storeSerialMessage(Buf,Len);
     return 0;
 }
 
 void canRxInt(CAN_HandleTypeDef *_hcan, uint8_t fifo){
-    slCan.canRxInt(fifo, SLCAN::CANIface::native_micros64());
+    slCan.storeCanMessage(fifo, SLCAN::CANIface::native_micros64());
 }
 

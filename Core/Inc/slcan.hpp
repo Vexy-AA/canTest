@@ -140,11 +140,19 @@ class CANIface
 public:
     CANIface():
         rx_queue_(HAL_CAN_RX_QUEUE_SIZE),
+        tx_queue_(HAL_CAN_RX_QUEUE_SIZE),
         rxSerial(100)
     {
+        rx_queue_.clear();
+        tx_queue_.clear();
+
+        pending_tx_[0] = CanTxItem();
+        pending_tx_[1] = CanTxItem();
+        pending_tx_[2] = CanTxItem();
+
        // AP_Param::setup_object_defaults(this, var_info);
     }
-
+    int8_t sendSerialByUSB(uint8_t  *pbuff, uint16_t length);
     // Overriden methods
     //bool set_event_handle(EventHandle* evt_handle) ;
     int8_t sendBack(uint8_t* Buf, uint32_t *Len);
@@ -164,8 +172,8 @@ public:
 
     int16_t receive(CANFrame& out_frame, uint64_t& rx_time,
                     CanIOFlags& out_flags) ;
-    int16_t receiveSerial(uint8_t* Buf, uint32_t *Len);
-    int16_t canRxInt(uint8_t fifo_index, uint64_t timestamp_us);
+    int16_t storeSerialMessage(uint8_t* Buf, uint32_t *Len);
+    int16_t storeCanMessage(uint8_t fifo_index, uint64_t timestamp_us);
     int16_t sendCan();
 
 
@@ -240,12 +248,12 @@ public:
     }
 private:    
     static constexpr bxcan::CanType* const cans_[1] = {reinterpret_cast<bxcan::CanType*>(uintptr_t(CAN_BASE))};
-    int16_t reportFrame(const CANFrame& frame, uint64_t timestamp_usec);
+    int16_t canFrameSendBySerial(const CANFrame& frame, uint64_t timestamp_usec);
 
     const char* processCommand(char* cmd);
 
     // pushes received frame into queue, false if failed
-    bool push_Frame(CANFrame &frame);
+    bool putCanFramToTxBuffer(CANFrame &frame);
 
     // Methods to handle different types of frames,
     // return true if successfully received frame type
@@ -266,6 +274,7 @@ private:
     //UARTDriver* _port; // UART interface port reference to be used for SLCAN iface
 
     ObjectBuffer<CanRxItem> rx_queue_; // Parsed Rx Frame queue
+    ObjectBuffer<CanRxItem> tx_queue_; // Parsed Rx Frame queue
     ByteBuffer rxSerial;
     const uint32_t _serial_lock_key = 0x53494442; // Key used to lock UART port for use by slcan
 
@@ -280,7 +289,6 @@ private:
     int8_t _iface_num = -1;
     uint32_t _last_had_activity;
     uint8_t num_tries;
-    CANIface* _can_iface; // Can interface to be used for interaction by SLCAN interface
     //HAL_Semaphore port_sem;
     bool _set_by_sermgr;
 
@@ -316,7 +324,7 @@ private:
     bool initialised_:1;
     bool had_activity_:1;
 
-    int16_t sendFrame(const CANFrame& frame, uint64_t tx_deadline,
+    int16_t canFrameSendByCAN(const CANFrame& frame, uint64_t tx_deadline,
                        CanIOFlags flags);
 
     CanTxItem pending_tx_[3];
@@ -327,6 +335,9 @@ protected:
 
     bool add_to_rx_queue(const CanRxItem &frm) {
         return rx_queue_.push(frm);
+    }
+    bool add_to_tx_queue(const CanRxItem &frm) {
+        return tx_queue_.push(frm);
     }
     
     uint32_t bitrate_;

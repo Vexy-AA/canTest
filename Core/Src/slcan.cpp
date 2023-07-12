@@ -45,13 +45,13 @@ static uint8_t hex2nibble(char c)
     return out;
 }
 
-bool SLCAN::CANIface::push_Frame(CANFrame &frame)
+bool SLCAN::CANIface::putCanFramToTxBuffer(CANFrame &frame)
 {
     CANIface::CanRxItem frm;
     frm.frame = frame;
     frm.flags = 0;
     frm.timestamp_us = native_micros64();
-    return add_to_rx_queue(frm);
+    return add_to_tx_queue(frm);
 }
 
 /**
@@ -88,7 +88,7 @@ bool SLCAN::CANIface::handle_FrameDataExt(const char* cmd, bool canfd)
     if (hex2nibble_error) {
         return false;
     }
-    return push_Frame(f);
+    return putCanFramToTxBuffer(f);
 }
 
 uint8_t SLCAN::CANFrame::dlcToDataLength(uint8_t dlc)
@@ -170,7 +170,7 @@ bool SLCAN::CANIface::handle_FDFrameDataExt(const char* cmd)
     if (hex2nibble_error) {
         return false;
     }
-    return push_Frame(f);
+    return putCanFramToTxBuffer(f);
 #endif //#if HAL_CANFD_SUPPORTED
 }
 
@@ -198,7 +198,7 @@ bool SLCAN::CANIface::handle_FrameDataStd(const char* cmd)
     if (hex2nibble_error) {
         return false;
     }
-    return push_Frame(f);
+    return putCanFramToTxBuffer(f);
 }
 
 bool SLCAN::CANIface::handle_FrameRTRExt(const char* cmd)
@@ -225,7 +225,7 @@ bool SLCAN::CANIface::handle_FrameRTRExt(const char* cmd)
     if (hex2nibble_error) {
         return false;
     }
-    return push_Frame(f);
+    return putCanFramToTxBuffer(f);
 }
 
 bool SLCAN::CANIface::handle_FrameRTRStd(const char* cmd)
@@ -246,7 +246,7 @@ bool SLCAN::CANIface::handle_FrameRTRStd(const char* cmd)
     if (hex2nibble_error) {
         return false;
     }
-    return push_Frame(f);
+    return putCanFramToTxBuffer(f);
 }
 
 static inline const char* getASCIIStatusCode(bool status)
@@ -297,16 +297,14 @@ const char* SLCAN::CANIface::processCommand(char* cmd)
     case 'F': {             // Get status flags
         resp_len = snprintf((char*)resp_bytes, sizeof(resp_bytes), "F%02X\r", unsigned(0));    // Returning success for compatibility reasons
         if (resp_len > 0) {
-            USBD_CDC_SetTxBuffer(&hUsbDeviceFS, resp_bytes, resp_len);
-            USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+            sendSerialByUSB(resp_bytes,resp_len);
         }
         return nullptr;
     }
     case 'V': {             // HW/SW version
         resp_len = snprintf((char*)resp_bytes, sizeof(resp_bytes),"V%x%x%x%x\r", 1, 0, 1, 0);
         if (resp_len > 0) {
-            USBD_CDC_SetTxBuffer(&hUsbDeviceFS, resp_bytes, resp_len);
-            USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+            sendSerialByUSB(resp_bytes,resp_len);
         }
         return nullptr;
     }
@@ -325,8 +323,7 @@ const char* SLCAN::CANIface::processCommand(char* cmd)
         *pos++ = '\0';
         resp_len = snprintf((char*)resp_bytes, sizeof(resp_bytes),"N%s\r", &buf[0]);
         if (resp_len > 0) {
-            USBD_CDC_SetTxBuffer(&hUsbDeviceFS, resp_bytes, resp_len);
-            USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+            sendSerialByUSB(resp_bytes,resp_len);
         }
         return nullptr;
     }
@@ -362,8 +359,7 @@ inline void SLCAN::CANIface::addByte(const uint8_t byte)
         if (response != nullptr) {
             char resp[10];
             strcpy(resp, response);
-            USBD_CDC_SetTxBuffer(&hUsbDeviceFS, reinterpret_cast<uint8_t*>(resp), strlen(response));
-            USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+            sendSerialByUSB(reinterpret_cast<uint8_t*>(resp),strlen(response));
         }
     } else if (byte == 8 || byte == 127) {  // DEL or BS (backspace)
         if (pos_ > 0) {
@@ -386,7 +382,7 @@ int16_t SLCAN::CANIface::receive(CANFrame& out_frame, uint64_t& rx_time,
         out_frame    = rx_item.frame;
         rx_time = rx_item.timestamp_us;
         out_flags    = rx_item.flags;
-        reportFrame(out_frame, native_micros64()); 
+        canFrameSendBySerial(out_frame, native_micros64()); 
         return 1;
     }
 
@@ -398,14 +394,14 @@ int16_t SLCAN::CANIface::receive(CANFrame& out_frame, uint64_t& rx_time,
         uint8_t b;
         rxSerial.read_byte(&b);
         addByte(b);
-        if (!rx_queue_.space()) {
+        if (!tx_queue_.space()) {
             break;
         }
     }
-    if (rx_queue_.available()) {
+    if (tx_queue_.available()) {
         // if we already have something in buffer transmit it
         CanRxItem frm;
-        if (!rx_queue_.peek(frm)) {
+        if (!tx_queue_.peek(frm)) {
             return 0;
         }
         out_frame = frm.frame;
@@ -418,11 +414,11 @@ int16_t SLCAN::CANIface::receive(CANFrame& out_frame, uint64_t& rx_time,
         //_can_iface->select(read, write, &out_frame, 0); // select without blocking
 
 
-        if (write && sendFrame(out_frame, native_micros64() + 100000, out_flags) == 1) {
-                rx_queue_.pop();
+        if (write && canFrameSendByCAN(out_frame, native_micros64() + 100000, out_flags) == 1) {
+                tx_queue_.pop();
                 num_tries = 0;
         } else if (num_tries > 8) {
-            rx_queue_.pop();
+            tx_queue_.pop();
             num_tries = 0;
         } else {
             num_tries++;
@@ -460,7 +456,8 @@ bool get_system_id_unformatted(uint8_t buf[], uint8_t &len)
 /// @param frame 
 /// @param timestamp_usec 
 /// @return 
-int16_t SLCAN::CANIface::reportFrame(const CANFrame& frame, uint64_t timestamp_usec)
+// canFrameSendBySerial
+int16_t SLCAN::CANIface::canFrameSendBySerial(const CANFrame& frame, uint64_t timestamp_usec)
 {
 #if HAL_CANFD_SUPPORTED
     constexpr unsigned SLCANMaxFrameSize = 200;
@@ -539,8 +536,7 @@ int16_t SLCAN::CANIface::reportFrame(const CANFrame& frame, uint64_t timestamp_u
         return 0;
     } */
     //Write to Serial
-    USBD_CDC_SetTxBuffer(&hUsbDeviceFS, &buffer[0], frame_size);
-    USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+    sendSerialByUSB(&buffer[0], frame_size);
     /* if (!_port->write_locked(&buffer[0], frame_size, _serial_lock_key)) { !!!
         return 0;
     } */
@@ -553,7 +549,8 @@ int16_t SLCAN::CANIface::reportFrame(const CANFrame& frame, uint64_t timestamp_u
 /// @param tx_deadline 
 /// @param flags 
 /// @return 
-int16_t SLCAN::CANIface::sendFrame(const CANFrame& frame, uint64_t tx_deadline,
+// canFrameSendbyCAN
+int16_t SLCAN::CANIface::canFrameSendByCAN(const CANFrame& frame, uint64_t tx_deadline,
                        CanIOFlags flags)
 {
     if (frame.isErrorFrame() || frame.dlc > 8) {
@@ -612,13 +609,18 @@ int16_t SLCAN::CANIface::sendFrame(const CANFrame& frame, uint64_t tx_deadline,
     return 1;
 }
 
-
+int8_t SLCAN::CANIface::sendSerialByUSB(uint8_t  *resp_bytes, uint16_t resp_len){
+    if (hUsbDeviceFS.pClassData == nullptr) return -1;
+    USBD_CDC_SetTxBuffer(&hUsbDeviceFS, resp_bytes, resp_len);
+    USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+    return 0;
+}
 /// RECEIVE
 /// @brief Receive serial bytes interrupt
 /// @param Buf 
 /// @param Len 
 /// @return 
-int16_t SLCAN::CANIface::receiveSerial(uint8_t* Buf, uint32_t *Len){
+int16_t SLCAN::CANIface::storeSerialMessage(uint8_t* Buf, uint32_t *Len){
     rxSerial.write(Buf, *Len);
     return 1;
 }
@@ -626,7 +628,7 @@ int16_t SLCAN::CANIface::receiveSerial(uint8_t* Buf, uint32_t *Len){
 /// @param fifo_index 
 /// @param timestamp_us 
 /// @return 
-int16_t SLCAN::CANIface::canRxInt(uint8_t fifo_index, uint64_t timestamp_us){
+int16_t SLCAN::CANIface::storeCanMessage(uint8_t fifo_index, uint64_t timestamp_us){
     bxcan::CanType* can_ = cans_[0];
     volatile uint32_t* const rfr_reg = (fifo_index == 0) ? &can_->RF0R : &can_->RF1R;
     if ((*rfr_reg & bxcan::RFR_FMP_MASK) == 0) {
