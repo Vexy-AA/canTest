@@ -253,7 +253,7 @@ private:
     const char* processCommand(char* cmd);
 
     // pushes received frame into queue, false if failed
-    bool putCanFramToTxBuffer(CANFrame &frame);
+    bool putCanFrameToTxBuffer(CANFrame &frame);
 
     // Methods to handle different types of frames,
     // return true if successfully received frame type
@@ -328,6 +328,7 @@ private:
                        CanIOFlags flags);
 
     CanTxItem pending_tx_[3];
+    int8_t usbFree();
 protected:
     int8_t get_iface_num() {
         return _iface_num;

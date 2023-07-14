@@ -15,6 +15,7 @@ int altMain(){
 }
 
 int8_t usbReceive(uint8_t* Buf, uint32_t *Len){
+    //HAL_Delay(10);
     slCan.storeSerialMessage(Buf,Len);
     return 0;
 }
